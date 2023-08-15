@@ -3,8 +3,11 @@ Implementation of YOLOv3 architecture
 """
 
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import config 
+import random
+import math
 from tqdm import tqdm
 from pytorch_lightning import LightningModule, Trainer, Callback
 from loss import YoloLoss
@@ -169,10 +172,13 @@ class YOLOv3(nn.Module):
         return layers
 
 class s13Model(LightningModule):
-    def __init__(self, in_channels=3, num_classes=80, max_lr=1e-3):
+    def __init__(self, in_channels=3, num_classes=80, max_lr=1e-3, multi_scale=FALSE):
         super().__init__()
         self.loss_fn = YoloLoss()
         self.max_lr = max_lr
+        self.imgsz = 416 # image size
+        self.gs = 13 # grid size
+        self.multi_scale = multi_scale
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.layers = self._create_conv_layers()
@@ -252,6 +258,15 @@ class s13Model(LightningModule):
     
     def training_step(self, batch, batch_idx):
         x, y = batch
+        if self.multi_scale:
+            #x = 
+            #sz = random.randrange(self.imgsz * 0.5, self.imgsz * 1.5 + gs) // gs * gs  # size
+            sz = random.randrange(self.imgsz * 0.5, self.imgsz * 1.5, self.gs)  #size
+            sf = sz / max(x.shape[2:])  # scale factor
+            if sf != 1:
+                ns = [math.ceil(x1 * sf / self.gs) * self.gs for x1 in x.shape[2:]]  # new shape (stretched to gs-multiple)
+                x = F.interpolate(x, size=ns, mode='bilinear', align_corners=False)
+
         with torch.cuda.amp.autocast():
             out = self(x)
             loss = self.criterion(out, y)
