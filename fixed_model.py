@@ -12,7 +12,6 @@ from tqdm import tqdm
 from pytorch_lightning import LightningModule, Trainer, Callback
 from loss import YoloLoss
 from utils import plot_couple_examples, get_evaluation_bboxes, mean_average_precision, cells_to_bboxes, check_class_accuracy
-from torchsummary import summary
 
 """ 
 Information about architecture config:
@@ -91,14 +90,10 @@ class ResidualBlock(nn.Module):
 
 
 class ScalePrediction(nn.Module):
-    def __init__(self, in_channels, num_classes, avg_pool=None):
+    def __init__(self, in_channels, num_classes):
         super().__init__()
-        layers = []
-        if avg_pool:
-            layers = [nn.AdaptiveAvgPool2d(avg_pool)]
-        self.pred = nn.Sequential( 
+        self.pred = nn.Sequential(
             CNNBlock(in_channels, 2 * in_channels, kernel_size=3, padding=1),
-            *layers,
             CNNBlock(
                 2 * in_channels, (num_classes + 5) * 3, bn_act=False, kernel_size=1
             ),
@@ -106,16 +101,11 @@ class ScalePrediction(nn.Module):
         self.num_classes = num_classes
 
     def forward(self, x):
-        x1 = self.pred(x)
         return (
-            x1.reshape(x1.shape[0], 3, self.num_classes + 5, x1.shape[2], x1.shape[3])
-              .permute(0, 1, 3, 4, 2)
+            self.pred(x)
+            .reshape(x.shape[0], 3, self.num_classes + 5, x.shape[2], x.shape[3])
+            .permute(0, 1, 3, 4, 2)
         )
-        # return (
-        #     self.pred(x)
-        #     .reshape(x.shape[0], 3, self.num_classes + 5, x.shape[2], x.shape[3])
-        #     .permute(0, 1, 3, 4, 2)
-        # )
 
 
 class YOLOv3(nn.Module):
@@ -149,7 +139,6 @@ class YOLOv3(nn.Module):
         in_channels = self.in_channels
 
         for module in model_config:
-            print('In step ', module)
             if isinstance(module, tuple):
                 out_channels, kernel_size, stride = module
                 layers.append(
@@ -183,12 +172,12 @@ class YOLOv3(nn.Module):
         return layers
 
 class s13Model(LightningModule):
-    def __init__(self, in_channels=3, num_classes=80, max_lr=1e-3, multi_scale=False):
+    def __init__(self, in_channels=3, num_classes=80, max_lr=1e-3, multi_scale=FALSE):
         super().__init__()
         self.loss_fn = YoloLoss()
         self.max_lr = max_lr
         self.imgsz = 416 # image size
-        self.gs = 32 # grid size
+        self.gs = 13 # grid size
         self.multi_scale = multi_scale
         self.num_classes = num_classes
         self.in_channels = in_channels
@@ -197,7 +186,6 @@ class s13Model(LightningModule):
 #         self.scaler = torch.cuda.amp.GradScaler()
         self.scaled_anchors = (torch.tensor(config.ANCHORS)
             * torch.tensor(config.S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)).to(config.DEVICE)
-        # print(self.scaled_anchors)
         
     def criterion(self, out, y):
         y0, y1, y2 = (
@@ -205,9 +193,6 @@ class s13Model(LightningModule):
                 y[1],
                 y[2]
             )
-        # print('y and out zero are : ', y[0].shape, out[0].shape)
-        # print('y and out one are : ', y[1].shape, out[1].shape)
-        # print('y and out two are : ', y[2].shape, out[2].shape)
         loss = (
                     self.loss_fn(out[0], y0, self.scaled_anchors[0])
                     + self.loss_fn(out[1], y1, self.scaled_anchors[1])
@@ -226,13 +211,9 @@ class s13Model(LightningModule):
             x = layer(x)
 
             if isinstance(layer, ResidualBlock) and layer.num_repeats == 8:
-                # print(x.shape)
-                # print(layer)
                 route_connections.append(x)
 
             elif isinstance(layer, nn.Upsample):
-                # print(layer)
-                # print('x and route_connections shape: ', x.shape, route_connections[-1].shape) 
                 x = torch.cat([x, route_connections[-1]], dim=1)
                 route_connections.pop()
 
@@ -242,7 +223,6 @@ class s13Model(LightningModule):
         layers = nn.ModuleList()
         in_channels = self.in_channels
 
-        s_count=0
         for module in model_config:
             if isinstance(module, tuple):
                 out_channels, kernel_size, stride = module
@@ -263,16 +243,10 @@ class s13Model(LightningModule):
 
             elif isinstance(module, str):
                 if module == "S":
-                    ## set the avg_pool output size to 13 for first time and them double each time, 26, 52 etc
-                    if s_count == 0:
-                        s_count=13
-                    else:
-                        s_count= s_count*2
-                        
                     layers += [
                         ResidualBlock(in_channels, use_residual=False, num_repeats=1),
                         CNNBlock(in_channels, in_channels // 2, kernel_size=1),
-                        ScalePrediction(in_channels // 2, num_classes=self.num_classes, avg_pool=s_count),
+                        ScalePrediction(in_channels // 2, num_classes=self.num_classes),
                     ]
                     in_channels = in_channels // 2
 
@@ -285,14 +259,13 @@ class s13Model(LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         if self.multi_scale:
-            sz = random.randrange(self.imgsz-160, self.imgsz+32, self.gs)  #size (pick 5*32=160 before and 1*32=32 after the image size)
+            #x = 
+            #sz = random.randrange(self.imgsz * 0.5, self.imgsz * 1.5 + gs) // gs * gs  # size
+            sz = random.randrange(self.imgsz * 0.5, self.imgsz * 1.5, self.gs)  #size
             sf = sz / max(x.shape[2:])  # scale factor
-            # print('size and scale factor ', sz, sf)
             if sf != 1:
                 ns = [math.ceil(x1 * sf / self.gs) * self.gs for x1 in x.shape[2:]]  # new shape (stretched to gs-multiple)
-                # ns = 416
                 x = F.interpolate(x, size=ns, mode='bilinear', align_corners=False)
-                # print('resized shape : ', x.shape, len(y))
 
         with torch.cuda.amp.autocast():
             out = self(x)
@@ -379,8 +352,7 @@ class s13Model(LightningModule):
     
 class PrintCallback(Callback):
     def on_train_epoch_start(self, trainer, pl_module):
-        if trainer.current_epoch > 25:
-            plot_couple_examples(trainer.model, trainer.val_dataloaders, 0.6, 0.5, trainer.model.scaled_anchors)
+        plot_couple_examples(trainer.model, trainer.val_dataloaders, 0.6, 0.5, trainer.model.scaled_anchors)
 
     def on_train_epoch_end(self, trainer, pl_module):
         metrics = trainer.callback_metrics
@@ -396,7 +368,7 @@ class PrintCallback(Callback):
         print('Creating Checkpoint..')
         trainer.save_checkpoint("s13Model.ckpt")
         
-        if trainer.current_epoch == trainer.max_epochs-1:
+        if trainer.current_epoch == trainer.max_epochs:
 
             pred_boxes, true_boxes = get_evaluation_bboxes(
                 trainer.val_dataloaders,
@@ -419,11 +391,8 @@ class PrintCallback(Callback):
 if __name__ == "__main__":
     num_classes = 20
     IMAGE_SIZE = 416
-    NEW_IMAGE_SIZE = 320
-    #model = YOLOv3(num_classes=num_classes)
-    model = s13Model(num_classes=num_classes) #.to('cuda')
-    # summary(model, (3, 256, 256))
-    x = torch.randn((2, 3, NEW_IMAGE_SIZE, NEW_IMAGE_SIZE))
+    model = YOLOv3(num_classes=num_classes)
+    x = torch.randn((2, 3, IMAGE_SIZE, IMAGE_SIZE))
     out = model(x)
     assert model(x)[0].shape == (2, 3, IMAGE_SIZE//32, IMAGE_SIZE//32, num_classes + 5)
     assert model(x)[1].shape == (2, 3, IMAGE_SIZE//16, IMAGE_SIZE//16, num_classes + 5)
