@@ -33,4 +33,14 @@ Following are the model parameter, class and object accuracies achieved in train
 - Object Accuracy - 77.64%
 - MAP - 0.5065
 
-Also the local version of the app.py file (for spaces app) can be found at [app.py](https://github.com/sdev2030/ERA1_Session13/blob/main/app.py.ipynb)
+## Solution - Notebook [multi_scale_s13_assignment](https://github.com/sdev2030/ERA1_Session13/blob/main/multi_scale_s13_assignment.ipynb)
+In this we will use Custom architecture modified to handle multi-resolution inputs, trained in torch lightning to achieve class and object accuracy of more than 80% by the 40th epoch. Implemented Mosaic Augmentation only 75% of the times, OneCycle Policy, train using float16 with batch size of 16 and image resolution from 256 to 448 size inputs in multiples of 32 randomly selected during each batch (modifed code in Training Step in model.py file). 
+
+Following are the model parameter, class and object accuracies achieved in training the model for 40 epochs.
+- Model Parameters - 61.6M
+- Class Accuracy - 82.63%
+- No Object Accuracy - 97.87%
+- Object Accuracy - 74.59%
+- MAP - 0.25769
+
+Also the local version of app.py file (for spaces app) can be found at [app.py](https://github.com/sdev2030/ERA1_Session13/blob/main/app.py.ipynb)
