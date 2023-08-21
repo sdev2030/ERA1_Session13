@@ -43,4 +43,10 @@ Following are the model parameter, class and object accuracies achieved in train
 - Object Accuracy - 74.59%
 - MAP - 0.25769
 
-Also the local version of app.py file (for spaces app) can be found at [app.py](https://github.com/sdev2030/ERA1_Session13/blob/main/app.py.ipynb)
+Graph showing learning rate used in one cycle LR policy.
+![LR finder Graph](https://github.com/sdev2030/ERA1_Session13/blob/main/images/onecycle_lr.png)
+
+Graphs from training showing loss for train and test datasets
+![Training Graphs](https://github.com/sdev2030/ERA1_Session13/blob/main/images/training_graphs.png)
+
+Also the local version of app.py file (for spaces app) can be found at [app.py](https://github.com/sdev2030/ERA1_Session13/blob/main/app_with_gradCAM.py.ipynb)
