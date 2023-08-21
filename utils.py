@@ -8,6 +8,10 @@ import torch
 
 from collections import Counter
 from torch.utils.data import DataLoader
+from typing import Callable, List, Tuple
+from pytorch_grad_cam.base_cam import BaseCAM
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from pytorch_grad_cam.utils.svd_on_activations import get_2d_projection
 # from tqdm import tqdm
 from tqdm import tqdm_notebook as tqdm
 
@@ -581,3 +585,77 @@ def clip_boxes(boxes, shape):
     else:  # np.array (faster grouped)
         boxes[..., [0, 2]] = boxes[..., [0, 2]].clip(0, shape[1])  # x1, x2
         boxes[..., [1, 3]] = boxes[..., [1, 3]].clip(0, shape[0])  # y1, y2
+
+def get_bboxes(out, thresh=0.6, iou_thresh=0.5, anchors=None):
+    # x = images
+    bboxes = [[] for _ in range(1)]
+    for i in range(3):
+        batch_size, A, S, _, _ = out[i].shape
+        anchor = anchors[i]
+        boxes_scale_i = cells_to_bboxes(
+            out[i], anchor, S=S, is_preds=True
+        )
+        for idx, (box) in enumerate(boxes_scale_i):
+            bboxes[idx] += box
+    # print(len(bboxes))
+    nms_boxes = non_max_suppression(
+        bboxes[0], iou_threshold=iou_thresh, threshold=thresh, box_format="midpoint",
+    )
+    
+    return nms_boxes
+    
+class YoloCAM(BaseCAM):
+    def __init__(self,
+                 model: torch.nn.Module,
+                 target_layers: List[torch.nn.Module],
+                 use_cuda: bool = False,
+                 reshape_transform: Callable = None
+                ):
+        super().__init__(model, target_layers, use_cuda, reshape_transform, uses_gradients=False
+                        )
+
+    def forward(self,
+        input_tensor: torch.Tensor,
+        scaled_anchors: torch.Tensor,
+        targets: List[torch.nn.Module],
+        eigen_smooth: bool = False,
+    ) -> np.ndarray:
+        if self.cuda:
+            input_tensor = input_tensor.cuda()
+
+        if self.compute_input_gradient:
+            input_tensor = torch.autograd.Variable(input_tensor,
+                                                   requires_grad=True)
+
+        outputs = self.activations_and_grads(input_tensor)
+        if targets is None:
+            # target_categories = np.argmax(outputs.cpu().data.numpy(), axis=-1)
+            nms_boxes = get_bboxes(out=outputs, anchors=scaled_anchors)
+            target_categories = [box[0] for box in nms_boxes]
+            targets = [ClassifierOutputTarget(
+                category) for category in target_categories]
+
+        if self.uses_gradients:
+            self.model.zero_grad()
+            loss = sum([target(output)
+                       for target, output in zip(targets, outputs)])
+            loss.backward(retain_graph=True)
+
+        # In most of the saliency attribution papers, the saliency is
+        # computed with a single target layer.
+        # Commonly it is the last convolutional layer.
+        # Here we support passing a list with multiple target layers.
+        # It will compute the saliency image for every image,
+        # and then aggregate them (with a default mean aggregation).
+        # This gives you more flexibility in case you just want to
+        # use all conv layers for example, all Batchnorm layers,
+        # or something else.
+        cam_per_layer = self.compute_cam_per_layer(input_tensor,
+                                                   targets,
+                                                   eigen_smooth)
+        return self.aggregate_multi_layers(cam_per_layer)
+
+    def get_cam_image(
+        self, input_tensor, target_layer, target_category, activations, grads, eigen_smooth
+    ):
+        return get_2d_projection(activations)
